@@ -210,8 +210,6 @@ def compute_metrics(p, id2label: Dict):
 def create_model_with_lora(config: NERConfig, num_labels: int, id2label: Dict, label2id: Dict):
     """Create BioBERT model with LoRA adapters."""
     
-    print(f"\n📦 Loading model: {config.model_name}")
-    
     # Load base model
     model = AutoModelForTokenClassification.from_pretrained(
         config.model_name,
@@ -252,26 +250,17 @@ def train_ner(config: NERConfig):
     print("="*60)
     
     # Load labels
-    print("\n📋 Loading labels...")
     labels, label2id, id2label = load_labels(config.data_dir)
-    print(f"   Found {len(labels)} labels: {labels}")
     
     # Load tokenizer
-    print("\n📝 Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     
     # Load datasets
-    print("\n📂 Loading datasets...")
     train_dataset = create_dataset(config.data_dir, "train")
     eval_dataset = create_dataset(config.data_dir, "dev")
     test_dataset = create_dataset(config.data_dir, "test")
     
-    print(f"   Train: {len(train_dataset)} samples")
-    print(f"   Dev:   {len(eval_dataset)} samples")
-    print(f"   Test:  {len(test_dataset)} samples")
-    
     # Tokenize datasets
-    print("\n🔄 Tokenizing datasets...")
     tokenize_fn = lambda examples: tokenize_and_align_labels(
         examples, tokenizer, label2id, config.max_length
     )
@@ -351,16 +340,9 @@ def train_ner(config: NERConfig):
     
     # Train
     print("\n🚀 Starting training...")
-    print(f"   Device: {config.device}")
-    print(f"   Epochs: {config.num_epochs}")
-    print(f"   Batch size: {config.batch_size}")
-    print(f"   Learning rate: {config.learning_rate}")
-    print(f"   LoRA rank: {config.lora_r}")
-    
     trainer.train()
     
     # Evaluate on test set
-    print("\n📊 Evaluating on test set...")
     test_results = trainer.evaluate(test_tokenized)
     
     print(f"\n{'='*60}")
@@ -371,7 +353,6 @@ def train_ner(config: NERConfig):
     print(f"   F1 Score:  {test_results['eval_f1']:.4f}")
     
     # Save model
-    print(f"\n💾 Saving model to {config.output_dir}")
     trainer.save_model(config.output_dir)
     tokenizer.save_pretrained(config.output_dir)
     
@@ -381,7 +362,7 @@ def train_ner(config: NERConfig):
     with open(Path(config.output_dir) / "id2label.json", 'w') as f:
         json.dump(id2label, f, indent=2)
     
-    print("\n✅ NER training complete!")
+    print("\n✅ Training complete! Model saved to", config.output_dir)
     
     return trainer, test_results
 

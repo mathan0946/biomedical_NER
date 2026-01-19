@@ -276,12 +276,9 @@ def compute_metrics(p, id2label: Dict):
 def create_model_with_lora(config: REConfig, num_labels: int, id2label: Dict, label2id: Dict):
     """Create BioBERT model with LoRA adapters for sequence classification."""
     
-    print(f"\n📦 Loading model: {config.model_name}")
-    
     # Configure 8-bit quantization for memory efficiency
     quantization_config = None
     if config.use_8bit:
-        print("   Using 8-bit quantization for memory efficiency")
         quantization_config = BitsAndBytesConfig(
             load_in_8bit=True,
         )
@@ -300,7 +297,6 @@ def create_model_with_lora(config: REConfig, num_labels: int, id2label: Dict, la
     # Enable gradient checkpointing for memory savings
     if hasattr(model, 'gradient_checkpointing_enable'):
         model.gradient_checkpointing_enable()
-        print("   Gradient checkpointing enabled")
     
     # Configure LoRA
     lora_config = LoraConfig(
@@ -333,12 +329,9 @@ def train_re(config: REConfig):
     print("="*60)
     
     # Load labels
-    print("\n📋 Loading labels...")
     labels, label2id, id2label = load_labels(config.data_dir)
-    print(f"   Found {len(labels)} labels: {labels}")
     
     # Load tokenizer
-    print("\n📝 Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     
     # Add special tokens for entity markers (with and without types)
@@ -350,26 +343,17 @@ def train_re(config: REConfig):
     tokenizer.add_special_tokens({"additional_special_tokens": special_tokens})
     
     # Load datasets
-    print("\n📂 Loading datasets...")
     train_dataset = create_dataset(config.data_dir, "train", config.max_samples_per_class)
     eval_dataset = create_dataset(config.data_dir, "dev")
     test_dataset = create_dataset(config.data_dir, "test")
     
-    print(f"   Train: {len(train_dataset)} samples (balanced)")
-    print(f"   Dev:   {len(eval_dataset)} samples")
-    print(f"   Test:  {len(test_dataset)} samples")
-    
     # Show class distribution
     train_labels = [s['label'] for s in train_dataset]
     label_counts = Counter(train_labels)
-    print("\n   Training class distribution:")
-    for label, count in sorted(label_counts.items()):
-        print(f"     • {label}: {count}")
     
     # Compute class weights for imbalanced data
     class_weights = None
     if config.use_class_weights:
-        print("\n⚖️  Computing class weights for imbalanced data...")
         total_samples = len(train_labels)
         num_classes = len(labels)
         weights = []
@@ -379,10 +363,8 @@ def train_re(config: REConfig):
             weight = total_samples / (num_classes * count)
             weights.append(min(weight, 10.0))  # Cap at 10x to avoid extreme weights
         class_weights = torch.tensor(weights, dtype=torch.float32)
-        print(f"   Class weights: {dict(zip(labels, [f'{w:.2f}' for w in weights]))}")
     
-    # Tokenize datasets with entity type information
-    print("\n🔄 Tokenizing datasets (with entity type hints)...")
+    # Tokenize datasets
     tokenize_fn = lambda examples: tokenize_function(
         examples, tokenizer, label2id, config.max_length, add_entity_types=True
     )
@@ -477,12 +459,6 @@ def train_re(config: REConfig):
     
     # Train
     print("\n🚀 Starting training...")
-    print(f"   Device: {config.device}")
-    print(f"   Epochs: {config.num_epochs}")
-    print(f"   Batch size: {config.batch_size}")
-    print(f"   Learning rate: {config.learning_rate}")
-    print(f"   LoRA rank: {config.lora_r}")
-    
     trainer.train()
     
     # Evaluate on test set
@@ -510,7 +486,6 @@ def train_re(config: REConfig):
     print(classification_report(true_names, pred_names))
     
     # Save model
-    print(f"\n💾 Saving model to {config.output_dir}")
     trainer.save_model(config.output_dir)
     tokenizer.save_pretrained(config.output_dir)
     
@@ -520,7 +495,7 @@ def train_re(config: REConfig):
     with open(Path(config.output_dir) / "id2label.json", 'w') as f:
         json.dump(id2label, f, indent=2)
     
-    print("\n✅ RE training complete!")
+    print("\n✅ Training complete! Model saved to", config.output_dir)
     
     return trainer, test_results
 

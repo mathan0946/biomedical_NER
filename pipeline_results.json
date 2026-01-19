@@ -1,0 +1,71 @@
+{
+  "text": "Metformin is a first-line drug for type 2 diabetes mellitus. \n    It works by activating AMPK and inhibiting hepatic glucose production. \n    The OCT1 transporter mediates its uptake into hepatocytes.",
+  "entities": [
+    {
+      "type": "ChemicalEntity",
+      "start": 0,
+      "end": 3,
+      "text": "Met"
+    },
+    {
+      "type": "ChemicalEntity",
+      "start": 3,
+      "end": 9,
+      "text": "formin"
+    },
+    {
+      "type": "DiseaseOrPhenotypicFeature",
+      "start": 35,
+      "end": 59,
+      "text": "type 2 diabetes mellitus"
+    },
+    {
+      "type": "GeneOrGeneProduct",
+      "start": 89,
+      "end": 91,
+      "text": "AM"
+    },
+    {
+      "type": "GeneOrGeneProduct",
+      "start": 91,
+      "end": 93,
+      "text": "PK"
+    },
+    {
+      "type": "ChemicalEntity",
+      "start": 117,
+      "end": 124,
+      "text": "glucose"
+    },
+    {
+      "type": "GeneOrGeneProduct",
+      "start": 146,
+      "end": 147,
+      "text": "O"
+    },
+    {
+      "type": "GeneOrGeneProduct",
+      "start": 147,
+      "end": 150,
+      "text": "CT1"
+    }
+  ],
+  "relations": [
+    {
+      "entity1": "Met",
+      "entity1_type": "ChemicalEntity",
+      "entity2": "type 2 diabetes mellitus",
+      "entity2_type": "DiseaseOrPhenotypicFeature",
+      "relation": "Negative_Correlation",
+      "confidence": 0.6709149479866028
+    },
+    {
+      "entity1": "formin",
+      "entity1_type": "ChemicalEntity",
+      "entity2": "type 2 diabetes mellitus",
+      "entity2_type": "DiseaseOrPhenotypicFeature",
+      "relation": "Negative_Correlation",
+      "confidence": 0.717210590839386
+    }
+  ]
+}
