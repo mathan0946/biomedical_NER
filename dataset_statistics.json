@@ -1,0 +1,78 @@
+{
+  "Train": {
+    "documents": 400,
+    "entities": 13351,
+    "relations": 4178,
+    "entity_types": {
+      "GeneOrGeneProduct": 4430,
+      "DiseaseOrPhenotypicFeature": 3646,
+      "ChemicalEntity": 2853,
+      "OrganismTaxon": 1429,
+      "SequenceVariant": 890,
+      "CellLine": 103
+    },
+    "relation_types": {
+      "Association": 2192,
+      "Positive_Correlation": 1089,
+      "Bind": 61,
+      "Negative_Correlation": 763,
+      "Comparison": 28,
+      "Conversion": 3,
+      "Cotreatment": 31,
+      "Drug_Interaction": 11
+    },
+    "avg_doc_length": 235.605,
+    "avg_entities_per_doc": 33.3775,
+    "avg_relations_per_doc": 10.445
+  },
+  "Dev": {
+    "documents": 100,
+    "entities": 3533,
+    "relations": 1162,
+    "entity_types": {
+      "DiseaseOrPhenotypicFeature": 982,
+      "GeneOrGeneProduct": 1087,
+      "ChemicalEntity": 822,
+      "OrganismTaxon": 370,
+      "SequenceVariant": 250,
+      "CellLine": 22
+    },
+    "relation_types": {
+      "Positive_Correlation": 352,
+      "Association": 560,
+      "Negative_Correlation": 216,
+      "Bind": 19,
+      "Cotreatment": 10,
+      "Comparison": 5
+    },
+    "avg_doc_length": 249.17,
+    "avg_entities_per_doc": 35.33,
+    "avg_relations_per_doc": 11.62
+  },
+  "Test": {
+    "documents": 100,
+    "entities": 3535,
+    "relations": 1163,
+    "entity_types": {
+      "GeneOrGeneProduct": 1180,
+      "DiseaseOrPhenotypicFeature": 917,
+      "OrganismTaxon": 393,
+      "ChemicalEntity": 754,
+      "SequenceVariant": 241,
+      "CellLine": 50
+    },
+    "relation_types": {
+      "Association": 635,
+      "Positive_Correlation": 325,
+      "Negative_Correlation": 171,
+      "Comparison": 6,
+      "Bind": 9,
+      "Conversion": 1,
+      "Cotreatment": 14,
+      "Drug_Interaction": 2
+    },
+    "avg_doc_length": 240.87,
+    "avg_entities_per_doc": 35.35,
+    "avg_relations_per_doc": 11.63
+  }
+}
