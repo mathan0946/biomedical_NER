@@ -223,20 +223,8 @@ class REPipeline:
 # ============================================================================
 
 def run_complete_pipeline(text: str, ner_pipeline: NERPipeline, re_pipeline: REPipeline, 
-                          min_confidence: float = 0.5, max_pairs: int = 20):
-    """
-    Run complete NER + RE pipeline on text.
-    
-    Args:
-        text: Input text
-        ner_pipeline: NER pipeline instance
-        re_pipeline: RE pipeline instance
-        min_confidence: Minimum confidence threshold for relations
-        max_pairs: Maximum entity pairs to process
-    
-    Returns:
-        dict with entities and relations
-    """
+                          min_confidence: float = 0.5, max_pairs: int = 10):
+    """Run complete NER + RE pipeline on text."""
     print("\n" + "="*80)
     print("BIOMEDICAL NER + RE PIPELINE")
     print("="*80)
@@ -254,29 +242,21 @@ def run_complete_pipeline(text: str, ner_pipeline: NERPipeline, re_pipeline: REP
     print(f"\n[2/2] Extracting relations...")
     relations = []
     
-    if len(entities) < 2:
-        print("Not enough entities for relation extraction")
-        return {"entities": entities, "relations": []}
-    
-    # Get all entity pairs
-    entity_pairs = list(combinations(entities, 2))
-    if len(entity_pairs) > max_pairs:
-        entity_pairs = entity_pairs[:max_pairs]
-        print(f"Processing {max_pairs} entity pairs (limited for performance)")
-    
-    for e1, e2 in entity_pairs:
-        relation, confidence = re_pipeline.predict(text, e1, e2)
+    if len(entities) >= 2:
+        entity_pairs = list(combinations(entities, 2))[:max_pairs]
         
-        # Filter out NO_RELATION and low confidence
-        if relation != "NO_RELATION" and confidence >= min_confidence:
-            relations.append({
-                "entity1": e1["text"],
-                "entity1_type": e1["type"],
-                "entity2": e2["text"],
-                "entity2_type": e2["type"],
-                "relation": relation,
-                "confidence": confidence
-            })
+        for e1, e2 in entity_pairs:
+            relation, confidence = re_pipeline.predict(text, e1, e2)
+            
+            if relation != "NO_RELATION" and confidence >= min_confidence:
+                relations.append({
+                    "entity1": e1["text"],
+                    "entity1_type": e1["type"],
+                    "entity2": e2["text"],
+                    "entity2_type": e2["type"],
+                    "relation": relation,
+                    "confidence": confidence
+                })
     
     print(f"Found {len(relations)} relations:")
     for rel in relations:
@@ -295,54 +275,29 @@ def run_complete_pipeline(text: str, ner_pipeline: NERPipeline, re_pipeline: REP
 # ============================================================================
 
 if __name__ == "__main__":
-    # Example biomedical texts
-    examples = [
-        """Metformin is a first-line drug for type 2 diabetes mellitus. It works by 
-        activating AMPK and inhibiting hepatic glucose production. The OCT1 transporter 
-        mediates its uptake into hepatocytes. Common variants like rs622342 in SLC22A1 
-        affect drug response. Studies in HepG2 cells confirmed these findings.""",
-        
-        """BRCA1 and BRCA2 mutations are associated with hereditary breast and ovarian 
-        cancer syndrome. Patients with these mutations have significantly increased 
-        lifetime risk. PARP inhibitors like Olaparib show efficacy in BRCA-mutated tumors.""",
-        
-        """Aspirin inhibits COX-1 and COX-2 enzymes, reducing prostaglandin synthesis. 
-        This mechanism explains its anti-inflammatory effects in rheumatoid arthritis. 
-        Drug interactions occur with warfarin, increasing bleeding risk."""
-    ]
+    # Example biomedical text
+    example_text = """Metformin is a first-line drug for type 2 diabetes mellitus. 
+    It works by activating AMPK and inhibiting hepatic glucose production. 
+    The OCT1 transporter mediates its uptake into hepatocytes."""
     
     # Load models
     print("\n🔧 Loading models...")
     ner_pipeline = NERPipeline()
     re_pipeline = REPipeline()
     
-    # Process examples
-    results = []
-    for i, text in enumerate(examples, 1):
-        print(f"\n\n{'='*80}")
-        print(f"EXAMPLE {i}")
-        print(f"{'='*80}")
-        print(f"\nText: {text.strip()[:200]}...")
-        
-        result = run_complete_pipeline(
-            text=text.strip(),
-            ner_pipeline=ner_pipeline,
-            re_pipeline=re_pipeline,
-            min_confidence=0.5,
-            max_pairs=20
-        )
-        results.append(result)
+    # Process text
+    print(f"\nInput text:\n{example_text.strip()}\n")
     
-    # Summary
-    print("\n\n" + "="*80)
-    print("SUMMARY")
-    print("="*80)
-    print(f"Processed {len(examples)} examples")
-    print(f"Total entities extracted: {sum(len(r['entities']) for r in results)}")
-    print(f"Total relations found: {sum(len(r['relations']) for r in results)}")
+    result = run_complete_pipeline(
+        text=example_text.strip(),
+        ner_pipeline=ner_pipeline,
+        re_pipeline=re_pipeline,
+        min_confidence=0.5,
+        max_pairs=10
+    )
     
-    # Save results
+    # Save result
     output_file = "pipeline_results.json"
     with open(output_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(result, f, indent=2)
     print(f"\n✅ Results saved to {output_file}")
