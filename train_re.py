@@ -20,14 +20,12 @@ from transformers import (
     Trainer,
     DataCollatorWithPadding,
     EarlyStoppingCallback,
-    BitsAndBytesConfig,
 )
 from datasets import Dataset
 from peft import (
     LoraConfig,
     get_peft_model,
     TaskType,
-    PeftModel,
 )
 from sklearn.metrics import (
     classification_report,
@@ -36,60 +34,6 @@ from sklearn.metrics import (
     recall_score,
     accuracy_score,
 )
-import torch.nn as nn
-
-
-class FocalLoss(nn.Module):
-    """Focal Loss for handling hard examples and class imbalance."""
-    
-    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
-        super().__init__()
-        self.alpha = alpha  # Class weights
-        self.gamma = gamma  # Focusing parameter
-        self.reduction = reduction
-    
-    def forward(self, inputs, targets):
-        # Move alpha to same device as inputs
-        alpha = self.alpha.to(inputs.device) if self.alpha is not None else None
-        ce_loss = nn.functional.cross_entropy(inputs, targets, reduction='none', weight=alpha)
-        p = torch.exp(-ce_loss)
-        focal_loss = (1 - p) ** self.gamma * ce_loss
-        
-        if self.reduction == 'mean':
-            return focal_loss.mean()
-        elif self.reduction == 'sum':
-            return focal_loss.sum()
-        return focal_loss
-
-
-class WeightedTrainer(Trainer):
-    """Custom trainer with focal loss and class weights for imbalanced data."""
-    
-    def __init__(self, class_weights=None, use_focal_loss=True, **kwargs):
-        super().__init__(**kwargs)
-        self.class_weights = class_weights
-        self.use_focal_loss = use_focal_loss
-        if use_focal_loss:
-            self.loss_fct = FocalLoss(alpha=class_weights, gamma=2.0)
-        else:
-            self.loss_fct = None
-    
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        labels = inputs.pop("labels")
-        outputs = model(**inputs)
-        logits = outputs.logits
-        
-        if self.use_focal_loss and self.loss_fct is not None:
-            loss = self.loss_fct(logits, labels)
-        elif self.class_weights is not None:
-            weight = self.class_weights.to(logits.device)
-            loss_fct = nn.CrossEntropyLoss(weight=weight)
-            loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
-        else:
-            loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
-        
-        return (loss, outputs) if return_outputs else loss
 
 
 # ============================================================================
@@ -106,31 +50,22 @@ class REConfig:
     data_dir: str = "data/re"
     output_dir: str = "models/biobert-re-lora"
     
-    # LoRA configuration (higher rank = more capacity)
-    lora_r: int = 48  # Higher rank for better performance
-    lora_alpha: int = 96  # 2x rank
-    lora_dropout: float = 0.05  # Lower dropout
+    # LoRA configuration
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.1
     lora_target_modules: List[str] = field(
-        default_factory=lambda: ["query", "key", "value", "dense"]
+        default_factory=lambda: ["query", "key", "value"]
     )
     
-    # Training hyperparameters (optimized for 4GB GPU)
-    max_length: int = 384  # Longer context for better relations
-    batch_size: int = 3    # Reduced for longer sequences
-    learning_rate: float = 1.5e-4  # Lower for stability with more data
-    num_epochs: int = 8  # More epochs for convergence
-    warmup_ratio: float = 0.15  # More warmup
+    # Training hyperparameters
+    max_length: int = 256
+    batch_size: int = 8
+    learning_rate: float = 2e-4
+    num_epochs: int = 5
+    warmup_ratio: float = 0.1
     weight_decay: float = 0.01
-    gradient_accumulation_steps: int = 10  # Effective batch = 30
-    
-    # 8-bit quantization for memory efficiency
-    use_8bit: bool = False  # Disabled due to Windows compatibility
-    
-    # Class weighting for imbalanced data
-    use_class_weights: bool = True
-    
-    # Data sampling (to handle class imbalance)
-    max_samples_per_class: int = None  # Use all data for best performance
+    gradient_accumulation_steps: int = 4
     
     # Evaluation
     eval_steps: int = 200
@@ -138,7 +73,7 @@ class REConfig:
     logging_steps: int = 50
     
     # Early stopping
-    early_stopping_patience: int = 5  # More patience for convergence
+    early_stopping_patience: int = 3
     
     # Device
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -171,39 +106,10 @@ def load_jsonl_data(filepath: str) -> List[Dict]:
     return data
 
 
-def balance_dataset(data: List[Dict], max_per_class: int = None) -> List[Dict]:
-    """Balance dataset by limiting samples per class."""
-    if max_per_class is None:
-        return data
-    
-    # Group by label
-    by_label = {}
-    for sample in data:
-        label = sample['label']
-        if label not in by_label:
-            by_label[label] = []
-        by_label[label].append(sample)
-    
-    # Sample from each class
-    balanced = []
-    for label, samples in by_label.items():
-        if len(samples) > max_per_class:
-            import random
-            random.seed(42)
-            samples = random.sample(samples, max_per_class)
-        balanced.extend(samples)
-    
-    return balanced
-
-
-def create_dataset(data_dir: str, split: str, max_per_class: int = None) -> Dataset:
+def create_dataset(data_dir: str, split: str) -> Dataset:
     """Create HuggingFace Dataset from JSONL file."""
     filepath = Path(data_dir) / f"{split}.jsonl"
     data = load_jsonl_data(filepath)
-    
-    if max_per_class and split == "train":
-        data = balance_dataset(data, max_per_class)
-    
     return Dataset.from_list(data)
 
 
@@ -215,24 +121,12 @@ def tokenize_function(
     examples: Dict,
     tokenizer,
     label2id: Dict,
-    max_length: int = 512,
-    add_entity_types: bool = True
+    max_length: int = 256
 ) -> Dict:
-    """Tokenize text for sequence classification with optional entity type info."""
-    
-    texts = examples["text"]
-    
-    # Optionally enhance with entity type information
-    if add_entity_types and "entity1_type" in examples and "entity2_type" in examples:
-        enhanced_texts = []
-        for text, e1_type, e2_type in zip(texts, examples["entity1_type"], examples["entity2_type"]):
-            # Add entity type hints in the text
-            text_with_types = text.replace("[E1]", f"[E1:{e1_type}]").replace("[E2]", f"[E2:{e2_type}]")
-            enhanced_texts.append(text_with_types)
-        texts = enhanced_texts
+    """Tokenize text for sequence classification."""
     
     tokenized = tokenizer(
-        texts,
+        examples["text"],
         truncation=True,
         padding="max_length",
         max_length=max_length,
@@ -334,39 +228,18 @@ def train_re(config: REConfig):
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     
-    # Add special tokens for entity markers (with and without types)
-    entity_types = ["Gene", "Disease", "Chemical", "Variant", "CellLine", "Organism"]
+    # Add special tokens for entity markers
     special_tokens = ["[E1]", "[/E1]", "[E2]", "[/E2]"]
-    # Add type-specific markers
-    for etype in entity_types:
-        special_tokens.extend([f"[E1:{etype}]", f"[E2:{etype}]"])
     tokenizer.add_special_tokens({"additional_special_tokens": special_tokens})
     
     # Load datasets
-    train_dataset = create_dataset(config.data_dir, "train", config.max_samples_per_class)
+    train_dataset = create_dataset(config.data_dir, "train")
     eval_dataset = create_dataset(config.data_dir, "dev")
     test_dataset = create_dataset(config.data_dir, "test")
     
-    # Show class distribution
-    train_labels = [s['label'] for s in train_dataset]
-    label_counts = Counter(train_labels)
-    
-    # Compute class weights for imbalanced data
-    class_weights = None
-    if config.use_class_weights:
-        total_samples = len(train_labels)
-        num_classes = len(labels)
-        weights = []
-        for label in labels:
-            count = label_counts.get(label, 1)
-            # Inverse frequency weighting with smoothing
-            weight = total_samples / (num_classes * count)
-            weights.append(min(weight, 10.0))  # Cap at 10x to avoid extreme weights
-        class_weights = torch.tensor(weights, dtype=torch.float32)
-    
     # Tokenize datasets
     tokenize_fn = lambda examples: tokenize_function(
-        examples, tokenizer, label2id, config.max_length, add_entity_types=True
+        examples, tokenizer, label2id, config.max_length
     )
     
     columns_to_remove = ["doc_id", "text", "entity1", "entity1_type", 
@@ -398,10 +271,7 @@ def train_re(config: REConfig):
     
     # Resize embeddings for new special tokens
     model.resize_token_embeddings(len(tokenizer))
-    
-    # Only move to device if not using 8-bit (8-bit handles device automatically)
-    if not config.use_8bit:
-        model.to(config.device)
+    model.to(config.device)
     
     # Data collator
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -415,7 +285,7 @@ def train_re(config: REConfig):
         save_steps=config.save_steps,
         learning_rate=config.learning_rate,
         per_device_train_batch_size=config.batch_size,
-        per_device_eval_batch_size=config.batch_size * 2,  # Larger eval batch
+        per_device_eval_batch_size=config.batch_size * 2,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         num_train_epochs=config.num_epochs,
         warmup_ratio=config.warmup_ratio,
@@ -424,23 +294,18 @@ def train_re(config: REConfig):
         load_best_model_at_end=True,
         metric_for_best_model="f1",
         greater_is_better=True,
-        save_total_limit=3,  # Keep more checkpoints
+        save_total_limit=2,
         report_to="none",
         fp16=torch.cuda.is_available(),
-        dataloader_num_workers=0,  # Avoid multiprocessing overhead on Windows
-        dataloader_pin_memory=True,
-        label_smoothing_factor=0.1,  # Label smoothing for regularization
-        lr_scheduler_type="cosine",  # Cosine annealing for better convergence
+        dataloader_num_workers=0,
     )
     
     # Create compute_metrics function
     def compute_metrics_fn(p):
         return compute_metrics(p, id2label)
     
-    # Use WeightedTrainer with focal loss if class weights are enabled
-    TrainerClass = WeightedTrainer if config.use_class_weights else Trainer
-    
-    trainer = TrainerClass(
+    # Create trainer
+    trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_tokenized,
@@ -448,8 +313,6 @@ def train_re(config: REConfig):
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics_fn,
-        class_weights=class_weights if config.use_class_weights else None,
-        use_focal_loss=True if config.use_class_weights else False,  # Enable focal loss
         callbacks=[
             EarlyStoppingCallback(
                 early_stopping_patience=config.early_stopping_patience
