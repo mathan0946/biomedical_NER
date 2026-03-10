@@ -49,23 +49,5 @@
       "end": 150,
       "text": "CT1"
     }
-  ],
-  "relations": [
-    {
-      "entity1": "Met",
-      "entity1_type": "ChemicalEntity",
-      "entity2": "type 2 diabetes mellitus",
-      "entity2_type": "DiseaseOrPhenotypicFeature",
-      "relation": "Negative_Correlation",
-      "confidence": 0.6709149479866028
-    },
-    {
-      "entity1": "formin",
-      "entity1_type": "ChemicalEntity",
-      "entity2": "type 2 diabetes mellitus",
-      "entity2_type": "DiseaseOrPhenotypicFeature",
-      "relation": "Negative_Correlation",
-      "confidence": 0.717210590839386
-    }
   ]
 }

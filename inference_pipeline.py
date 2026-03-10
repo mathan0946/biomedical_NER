@@ -1,14 +1,13 @@
 """
-Complete Biomedical NER + RE Pipeline
-Uses trained BioBERT models to extract entities and relationships from text.
+Biomedical Named Entity Recognition (NER) Pipeline
+Uses trained BioBERT model to extract entities from text.
 """
 
 import torch
 import json
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForTokenClassification, AutoModelForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForTokenClassification
 from peft import PeftModel
-from itertools import combinations
 
 
 # ============================================================================
@@ -16,7 +15,6 @@ from itertools import combinations
 # ============================================================================
 
 NER_MODEL_PATH = "models/biobert-ner-lora"
-RE_MODEL_PATH = "models/biobert-re-lora"
 BASE_MODEL = "dmis-lab/biobert-base-cased-v1.2"
 
 ENTITY_COLORS = {
@@ -138,139 +136,6 @@ class NERPipeline:
 
 
 # ============================================================================
-# Relation Extraction Pipeline
-# ============================================================================
-
-class REPipeline:
-    """Relation Extraction pipeline."""
-    
-    def __init__(self, model_path: str = RE_MODEL_PATH):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model_path = Path(model_path)
-        self._load_model()
-    
-    def _load_model(self):
-        """Load RE model and tokenizer."""
-        print(f"Loading RE model from {self.model_path}...")
-        
-        # Load label mappings
-        with open(self.model_path / "id2label.json", "r") as f:
-            self.id2label = {int(k): v for k, v in json.load(f).items()}
-        with open(self.model_path / "label2id.json", "r") as f:
-            self.label2id = json.load(f)
-        
-        # Load tokenizer with special tokens
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
-        
-        # Load model
-        base_model = AutoModelForSequenceClassification.from_pretrained(
-            BASE_MODEL,
-            num_labels=len(self.id2label),
-            id2label=self.id2label,
-            label2id=self.label2id,
-            ignore_mismatched_sizes=True,
-        )
-        base_model.resize_token_embeddings(len(self.tokenizer))
-        
-        self.model = PeftModel.from_pretrained(base_model, self.model_path)
-        self.model.to(self.device)
-        self.model.eval()
-        print(f"RE model loaded on {self.device}")
-    
-    def predict(self, text: str, entity1: dict, entity2: dict) -> tuple:
-        """Predict relationship between two entities."""
-        # Sort entities by position
-        if entity1["start"] < entity2["start"]:
-            first, second = entity1, entity2
-            first_markers = ("[E1]", "[/E1]")
-            second_markers = ("[E2]", "[/E2]")
-        else:
-            first, second = entity2, entity1
-            first_markers = ("[E2]", "[/E2]")
-            second_markers = ("[E1]", "[/E1]")
-        
-        # Create marked text
-        marked_text = (
-            text[:first["start"]] +
-            first_markers[0] + text[first["start"]:first["end"]] + first_markers[1] +
-            text[first["end"]:second["start"]] +
-            second_markers[0] + text[second["start"]:second["end"]] + second_markers[1] +
-            text[second["end"]:]
-        )
-        
-        # Tokenize
-        inputs = self.tokenizer(
-            marked_text,
-            truncation=True,
-            max_length=384,
-            return_tensors="pt",
-        )
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        
-        # Predict
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            probs = torch.softmax(outputs.logits, dim=-1)[0]
-            pred_id = torch.argmax(probs).item()
-            confidence = probs[pred_id].item()
-        
-        relation = self.id2label[pred_id]
-        return relation, confidence
-
-
-# ============================================================================
-# Complete Pipeline
-# ============================================================================
-
-def run_complete_pipeline(text: str, ner_pipeline: NERPipeline, re_pipeline: REPipeline, 
-                          min_confidence: float = 0.5, max_pairs: int = 10):
-    """Run complete NER + RE pipeline on text."""
-    print("\n" + "="*80)
-    print("BIOMEDICAL NER + RE PIPELINE")
-    print("="*80)
-    
-    # Step 1: Extract entities
-    print("\n[1/2] Extracting entities...")
-    entities = ner_pipeline.predict(text)
-    print(f"Found {len(entities)} entities:")
-    
-    for entity in entities:
-        icon = ENTITY_COLORS.get(entity['type'], '⚪')
-        print(f"  {icon} {entity['text']:<30} ({entity['type']})")
-    
-    # Step 2: Extract relations between entity pairs
-    print(f"\n[2/2] Extracting relations...")
-    relations = []
-    
-    if len(entities) >= 2:
-        entity_pairs = list(combinations(entities, 2))[:max_pairs]
-        
-        for e1, e2 in entity_pairs:
-            relation, confidence = re_pipeline.predict(text, e1, e2)
-            
-            if relation != "NO_RELATION" and confidence >= min_confidence:
-                relations.append({
-                    "entity1": e1["text"],
-                    "entity1_type": e1["type"],
-                    "entity2": e2["text"],
-                    "entity2_type": e2["type"],
-                    "relation": relation,
-                    "confidence": confidence
-                })
-    
-    print(f"Found {len(relations)} relations:")
-    for rel in relations:
-        print(f"  • {rel['entity1']} --[{rel['relation']}]--> {rel['entity2']} "
-              f"(confidence: {rel['confidence']:.2%})")
-    
-    return {
-        "text": text,
-        "entities": entities,
-        "relations": relations
-    }
-
-
-# ============================================================================
 # Example Usage
 # ============================================================================
 
@@ -280,23 +145,30 @@ if __name__ == "__main__":
     It works by activating AMPK and inhibiting hepatic glucose production. 
     The OCT1 transporter mediates its uptake into hepatocytes."""
     
-    # Load models
-    print("\n🔧 Loading models...")
+    # Load model
+    print("\n🔧 Loading NER model...")
     ner_pipeline = NERPipeline()
-    re_pipeline = REPipeline()
     
     # Process text
     print(f"\nInput text:\n{example_text.strip()}\n")
+    print("\n" + "="*80)
+    print("BIOMEDICAL NER PIPELINE")
+    print("="*80)
     
-    result = run_complete_pipeline(
-        text=example_text.strip(),
-        ner_pipeline=ner_pipeline,
-        re_pipeline=re_pipeline,
-        min_confidence=0.5,
-        max_pairs=10
-    )
+    print("\nExtracting entities...")
+    entities = ner_pipeline.predict(example_text.strip())
+    
+    print(f"\nFound {len(entities)} entities:")
+    for entity in entities:
+        icon = ENTITY_COLORS.get(entity['type'], '⚪')
+        print(f"  {icon} {entity['text']:<30} ({entity['type']})")
     
     # Save result
+    result = {
+        "text": example_text.strip(),
+        "entities": entities
+    }
+    
     output_file = "pipeline_results.json"
     with open(output_file, 'w') as f:
         json.dump(result, f, indent=2)
