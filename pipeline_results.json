@@ -1,53 +1,109 @@
 {
-  "text": "Metformin is a first-line drug for type 2 diabetes mellitus. \n    It works by activating AMPK and inhibiting hepatic glucose production. \n    The OCT1 transporter mediates its uptake into hepatocytes.",
+  "text": "Metformin is used to treat type 2 diabetes mellitus. \nStudies show that AMPK activation by metformin reduces glucose production in the liver. \nThe OCT1 transporter is responsible for metformin uptake.",
   "entities": [
     {
       "type": "ChemicalEntity",
       "start": 0,
-      "end": 3,
-      "text": "Met"
-    },
-    {
-      "type": "ChemicalEntity",
-      "start": 3,
       "end": 9,
-      "text": "formin"
+      "text": "Metformin"
     },
     {
       "type": "DiseaseOrPhenotypicFeature",
-      "start": 35,
-      "end": 59,
+      "start": 27,
+      "end": 51,
       "text": "type 2 diabetes mellitus"
     },
     {
       "type": "GeneOrGeneProduct",
-      "start": 89,
-      "end": 91,
+      "start": 72,
+      "end": 74,
       "text": "AM"
     },
     {
       "type": "GeneOrGeneProduct",
-      "start": 91,
-      "end": 93,
+      "start": 74,
+      "end": 76,
       "text": "PK"
     },
     {
       "type": "ChemicalEntity",
-      "start": 117,
-      "end": 124,
+      "start": 91,
+      "end": 100,
+      "text": "metformin"
+    },
+    {
+      "type": "ChemicalEntity",
+      "start": 109,
+      "end": 116,
       "text": "glucose"
     },
     {
       "type": "GeneOrGeneProduct",
-      "start": 146,
-      "end": 147,
+      "start": 147,
+      "end": 148,
       "text": "O"
     },
     {
       "type": "GeneOrGeneProduct",
-      "start": 147,
-      "end": 150,
+      "start": 148,
+      "end": 151,
       "text": "CT1"
+    },
+    {
+      "type": "ChemicalEntity",
+      "start": 183,
+      "end": 192,
+      "text": "metformin"
+    }
+  ],
+  "relations": [
+    {
+      "head": "Metformin",
+      "head_type": "ChemicalEntity",
+      "tail": "type 2 diabetes mellitus",
+      "tail_type": "DiseaseOrPhenotypicFeature",
+      "relation": "Negative_Correlation",
+      "confidence": 0.616
+    },
+    {
+      "head": "type 2 diabetes mellitus",
+      "head_type": "DiseaseOrPhenotypicFeature",
+      "tail": "metformin",
+      "tail_type": "ChemicalEntity",
+      "relation": "Negative_Correlation",
+      "confidence": 0.824
+    },
+    {
+      "head": "type 2 diabetes mellitus",
+      "head_type": "DiseaseOrPhenotypicFeature",
+      "tail": "metformin",
+      "tail_type": "ChemicalEntity",
+      "relation": "Negative_Correlation",
+      "confidence": 0.777
+    },
+    {
+      "head": "AM",
+      "head_type": "GeneOrGeneProduct",
+      "tail": "metformin",
+      "tail_type": "ChemicalEntity",
+      "relation": "Negative_Correlation",
+      "confidence": 0.533
+    },
+    {
+      "head": "PK",
+      "head_type": "GeneOrGeneProduct",
+      "tail": "metformin",
+      "tail_type": "ChemicalEntity",
+      "relation": "Negative_Correlation",
+      "confidence": 0.574
+    },
+    {
+      "head": "PK",
+      "head_type": "GeneOrGeneProduct",
+      "tail": "metformin",
+      "tail_type": "ChemicalEntity",
+      "relation": "Negative_Correlation",
+      "confidence": 0.597
     }
   ]
 }
