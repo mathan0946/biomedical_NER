@@ -1,13 +1,11 @@
 """
 Fine-tune BioBERT with QLoRA for Relation Extraction (RE).
-Optimized for RTX 3050 4GB VRAM — ACCURACY FOCUSED.
+Optimized for RTX 3050 4GB VRAM.
 
-Improvements for better performance:
-  1. Full dataset (93K samples) with smart sampling
-  2. Longer sequences (256 tokens) for better context
-  3. Class weighting + focal loss for imbalanced data
-  4. 4 epochs with cosine LR schedule
-  5. Larger LoRA rank (24) for more capacity
+Uses:
+  - QLoRA (4-bit quantization + LoRA adapters)
+  - Focal Loss with class weighting for imbalanced data
+  - Smart dataset balancing (cap majority, oversample minority)
 """
 
 import os
@@ -69,26 +67,17 @@ class FocalLoss(nn.Module):
 
 
 class FocalTrainer(Trainer):
-    """Custom trainer with focal loss."""
+    """Custom trainer with focal loss and class weighting."""
     
-    def __init__(self, *args, class_weights=None, use_focal_loss=True, **kwargs):
+    def __init__(self, *args, class_weights=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.use_focal_loss = use_focal_loss
-        if use_focal_loss and class_weights is not None:
-            self.loss_fn = FocalLoss(alpha=class_weights, gamma=2.0)
-        else:
-            self.loss_fn = None
+        self.loss_fn = FocalLoss(alpha=class_weights, gamma=2.0)
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.logits
-        
-        if self.loss_fn is not None:
-            loss = self.loss_fn(logits, labels)
-        else:
-            loss = nn.functional.cross_entropy(logits, labels)
-        
+        loss = self.loss_fn(logits, labels)
         return (loss, outputs) if return_outputs else loss
 
 
@@ -98,12 +87,12 @@ class FocalTrainer(Trainer):
 
 @dataclass
 class REConfig:
-    """Configuration for RE training — optimized for accuracy."""
+    """Configuration for RE training with QLoRA and Focal Loss."""
     model_name: str = "dmis-lab/biobert-base-cased-v1.2"
     data_dir: str = "data/re"
     output_dir: str = "models/biobert-re-lora"
 
-    # QLoRA — larger rank for more capacity
+    # QLoRA parameters
     lora_r: int = 24
     lora_alpha: int = 48
     lora_dropout: float = 0.1
@@ -111,25 +100,20 @@ class REConfig:
         default_factory=lambda: ["query", "key", "value", "dense"]
     )
 
-    # Training — optimized for 2-hour runtime + good accuracy
-    max_length: int = 240               # Good context
-    batch_size: int = 6                 # Larger batch for speed
+    # Training parameters
+    max_length: int = 240
+    batch_size: int = 6
     gradient_accumulation_steps: int = 4  # Effective batch = 24
     learning_rate: float = 2.5e-4
     num_epochs: int = 4
     warmup_ratio: float = 0.1
     weight_decay: float = 0.01
 
-    # Smart sampling — cap majority, oversample minority
-    balance_strategy: str = "balanced"  # "none", "undersample", "oversample", "balanced"
-    max_samples_per_class: int = 6000    # Cap majority classes
-    min_samples_per_class: int = 2000    # Oversample small classes to this
+    # Dataset balancing
+    max_samples_per_class: int = 6000  # Cap majority classes
+    min_samples_per_class: int = 2000  # Oversample minority classes
 
-    # Loss configuration
-    use_focal_loss: bool = True
-    use_class_weights: bool = True
-
-    # Eval / save
+    # Evaluation
     eval_steps: int = 500
     save_steps: int = 500
     logging_steps: int = 100
@@ -158,64 +142,32 @@ def load_jsonl(filepath: str):
     return data
 
 
-def balance_dataset(data: List[Dict], strategy: str, min_per_class: int, max_per_class: int = None, seed: int = 42):
-    """Smart balancing: cap majority, oversample minority."""
+def balance_dataset(data: List[Dict], min_per_class: int, max_per_class: int, seed: int = 42):
+    """Balance dataset: cap majority classes, oversample minority classes."""
     random.seed(seed)
     
     by_label = {}
     for sample in data:
         by_label.setdefault(sample["label"], []).append(sample)
     
-    if strategy == "none":
-        return data
+    balanced = []
+    for label, samples in by_label.items():
+        if len(samples) > max_per_class:
+            # Undersample large classes
+            sampled = random.sample(samples, max_per_class)
+            balanced.extend(sampled)
+            print(f"  ✓ {label}: {len(samples)} → {max_per_class} (capped)")
+        elif len(samples) < min_per_class:
+            # Oversample small classes
+            oversampled = random.choices(samples, k=min_per_class)
+            balanced.extend(oversampled)
+            print(f"  ✓ {label}: {len(samples)} → {min_per_class} (oversampled)")
+        else:
+            balanced.extend(samples)
+            print(f"  ✓ {label}: {len(samples)} (kept all)")
     
-    elif strategy == "balanced":
-        # Cap majority at max_per_class, oversample minority to min_per_class
-        balanced = []
-        for label, samples in by_label.items():
-            if len(samples) > max_per_class:
-                # Undersample large classes
-                sampled = random.sample(samples, max_per_class)
-                balanced.extend(sampled)
-                print(f"  ✓ {label}: {len(samples)} → {max_per_class} (capped)")
-            elif len(samples) < min_per_class:
-                # Oversample small classes
-                oversampled = random.choices(samples, k=min_per_class)
-                balanced.extend(oversampled)
-                print(f"  ✓ {label}: {len(samples)} → {min_per_class} (oversampled)")
-            else:
-                balanced.extend(samples)
-                print(f"  ✓ {label}: {len(samples)} (kept all)")
-        random.shuffle(balanced)
-        return balanced
-    
-    elif strategy == "oversample":
-        # Oversample minority classes to min_per_class
-        balanced = []
-        for label, samples in by_label.items():
-            if len(samples) < min_per_class:
-                oversampled = random.choices(samples, k=min_per_class)
-                balanced.extend(oversampled)
-                print(f"  ✓ {label}: {len(samples)} → {min_per_class} (oversampled)")
-            else:
-                balanced.extend(samples)
-                print(f"  ✓ {label}: {len(samples)} (kept all)")
-        random.shuffle(balanced)
-        return balanced
-    
-    elif strategy == "undersample":
-        # Cap each class at min_per_class
-        balanced = []
-        for label, samples in by_label.items():
-            if len(samples) > min_per_class:
-                sampled = random.sample(samples, min_per_class)
-                balanced.extend(sampled)
-            else:
-                balanced.extend(samples)
-        random.shuffle(balanced)
-        return balanced
-    
-    return data
+    random.shuffle(balanced)
+    return balanced
 
 
 def compute_class_weights(data: List[Dict], labels: List[str]) -> torch.Tensor:
@@ -234,22 +186,18 @@ def compute_class_weights(data: List[Dict], labels: List[str]) -> torch.Tensor:
     return torch.tensor(weights, dtype=torch.float32)
 
 
-def create_dataset(data_dir: str, split: str, balance_cfg: Dict = None) -> Dataset:
+def create_dataset(data_dir: str, split: str, min_per_class: int = None, max_per_class: int = None) -> Dataset:
+    """Load dataset and balance if training split."""
     data = load_jsonl(Path(data_dir) / f"{split}.jsonl")
     
-    if balance_cfg and split == "train":
-        data = balance_dataset(
-            data, 
-            balance_cfg["strategy"], 
-            balance_cfg["min_per_class"],
-            balance_cfg.get("max_per_class")
-        )
+    if split == "train" and min_per_class and max_per_class:
+        data = balance_dataset(data, min_per_class, max_per_class)
     
     return Dataset.from_list(data)
 
 
 # ============================================================================
-# Tokenisation — dynamic padding for efficiency
+# Tokenization
 # ============================================================================
 
 def tokenize_fn(examples, tokenizer, label2id, max_length):
@@ -324,7 +272,7 @@ def compute_metrics(pred, id2label):
 def train_re(config: REConfig):
 
     print("\n" + "=" * 60)
-    print("  BioBERT + QLoRA  —  RE (Accuracy Optimized)")
+    print("  BioBERT + QLoRA + Focal Loss")
     print("=" * 60)
 
     labels, label2id, id2label = load_labels(config.data_dir)
@@ -334,29 +282,24 @@ def train_re(config: REConfig):
         {"additional_special_tokens": ["[E1]", "[/E1]", "[E2]", "[/E2]"]}
     )
 
-    # Load with smart balancing
-    print(f"\nBalancing strategy: {config.balance_strategy}")
-    balance_cfg = {
-        "strategy": config.balance_strategy,
-        "min_per_class": config.min_samples_per_class,
-        "max_per_class": config.max_samples_per_class
-    }
-    
-    train_ds = create_dataset(config.data_dir, "train", balance_cfg)
-    eval_ds  = create_dataset(config.data_dir, "dev")
-    test_ds  = create_dataset(config.data_dir, "test")
+    # Load datasets with balanced training data
+    print("\nBalancing training dataset...")
+    train_ds = create_dataset(
+        config.data_dir, "train",
+        min_per_class=config.min_samples_per_class,
+        max_per_class=config.max_samples_per_class
+    )
+    eval_ds = create_dataset(config.data_dir, "dev")
+    test_ds = create_dataset(config.data_dir, "test")
 
     print(f"\nDataset sizes:")
     print(f"  Train: {len(train_ds)} samples")
     print(f"  Dev:   {len(eval_ds)} | Test: {len(test_ds)}")
 
-    # Compute class weights
-    class_weights = None
-    if config.use_class_weights:
-        # Use original train data for weights calculation
-        orig_train = load_jsonl(Path(config.data_dir) / "train.jsonl")
-        class_weights = compute_class_weights(orig_train, labels)
-        print(f"\nClass weights: {dict(zip(labels, [f'{w:.2f}' for w in class_weights]))}")
+    # Compute class weights for focal loss
+    orig_train = load_jsonl(Path(config.data_dir) / "train.jsonl")
+    class_weights = compute_class_weights(orig_train, labels)
+    print(f"\nClass weights: {dict(zip(labels, [f'{w:.2f}' for w in class_weights]))}")
 
     # Tokenize
     cols = list(train_ds.column_names)
@@ -366,7 +309,7 @@ def train_re(config: REConfig):
     eval_tok  = eval_ds.map(map_fn, batched=True, remove_columns=cols, desc="Tok dev")
     test_tok  = test_ds.map(map_fn, batched=True, remove_columns=cols, desc="Tok test")
 
-    # Model
+    # Build model with QLoRA
     model = build_model(config, len(labels), id2label, label2id)
     model.resize_token_embeddings(len(tokenizer))
 
@@ -402,17 +345,15 @@ def train_re(config: REConfig):
         dataloader_num_workers=0,
         optim="paged_adamw_8bit",
         gradient_checkpointing=True,
-        lr_scheduler_type="cosine",      # Cosine decay for better convergence
-        label_smoothing_factor=0.05,     # Light smoothing for regularization
+        lr_scheduler_type="cosine",
+        label_smoothing_factor=0.05,
     )
 
     def metrics_fn(p):
         return compute_metrics(p, id2label)
 
-    # Use FocalTrainer if focal loss enabled
-    TrainerClass = FocalTrainer if config.use_focal_loss else Trainer
-    
-    trainer = TrainerClass(
+    # Use FocalTrainer with class weights
+    trainer = FocalTrainer(
         model=model,
         args=training_args,
         train_dataset=train_tok,
@@ -420,12 +361,11 @@ def train_re(config: REConfig):
         tokenizer=tokenizer,
         data_collator=data_collator,
         compute_metrics=metrics_fn,
-        class_weights=class_weights if config.use_focal_loss else None,
-        use_focal_loss=config.use_focal_loss,
+        class_weights=class_weights,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=config.early_stopping_patience)],
     )
 
-    print("\n🚀 Starting training...")
+    print("\n🚀 Starting training with Focal Loss...")
     trainer.train()
 
     # Test evaluation
